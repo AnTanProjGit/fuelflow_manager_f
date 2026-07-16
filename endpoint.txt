@@ -1,0 +1,165 @@
+
+
+ Расположение контрактов (типов данных)
+Все контракты и интерфейсы данных для взаимодействия между клиентом и сервером прописаны на фронтенде в файле:
+📌 /src/types.ts
+Ниже приведены полные объявления интерфейсов, которые используются для типизации данных в приложении:
+code
+TypeScript
+// Статус наличия видов топлива на АЗС
+export interface FuelStatus {
+  AI92: 'available' | 'empty' | 'unloading' | 'unknown' | 'coupon';
+  AI95: 'available' | 'empty' | 'unloading' | 'unknown' | 'coupon';
+  DT: 'available' | 'empty' | 'unloading' | 'unknown' | 'coupon';
+}
+
+// Модель автозаправочной станции (АЗС)
+export interface GasStation {
+  id: string;
+  brand: string;
+  address: string;
+  coords: { lat: number; lng: number };
+  status: FuelStatus;
+  queueLength: 'none' | 'short' | 'medium' | 'long';
+  waitingTime: number; // время ожидания в минутах
+  confidenceScore: number; // показатель достоверности от 0 до 1
+  deficitForecast: 'low' | 'medium' | 'high'; // прогноз дефицита
+  nextDelivery: string; // ближайшая поставка, например, "через 2 часа"
+  updatedAt: string;
+  apiUrl?: string; // URL для интеграции данных АЗС по API
+  apiKey?: string; // Ключ API для интеграции
+}
+
+// Подключаемый Telegram-канал
+export interface ChatChannel {
+  id: string;
+  name: string;
+  keywords: string; // Ключевые слова через запятую
+  excludeFromAnalysis?: boolean;
+}
+
+// Сообщение из чата/канала
+export interface ChatMessage {
+  id: string;
+  sender: string;
+  text: string;
+  parsed?: {
+    isFuelRelated: boolean; // Относится ли сообщение к топливу
+    brand: string | null;
+    address: string | null;
+    fuelType: string | null;
+    status: 'available' | 'empty' | 'unloading' | null;
+    queue: 'none' | 'short' | 'medium' | 'long' | null;
+    isFake: boolean;
+    explanation: string; // Объяснение от ИИ (Gemini)
+  };
+  source: 'telegram' | 'report_app' | 'report_bot' | 'max_integration';
+  isFake: boolean;
+  createdAt: string;
+}
+
+// Будущие поставки топлива
+export interface SupplyEvent {
+  id: string;
+  stationId: string;
+  stationName: string;
+  eta: string;
+  fuelType: string;
+  confidence: number;
+}
+
+// Подписчик/Участник мониторинга
+export interface Subscriber {
+  name: string;
+  status: 'active' | 'banned';
+  messagesCount: number;
+  lastActive: string;
+}
+
+// Системные настройки (включая LLM и внешние API)
+export interface SystemSettings {
+  llmModel: string;
+  systemPrompt: string;
+  ragContext: string;
+  temperature: number;
+  totalTokensUsed: number;
+  apiUrl?: string;
+  llmApiKey?: string;
+  proxyType?: 'direct' | 'cloudflare' | 'custom' | 'vpn';
+  proxyAddress?: string;
+  recommendationApiUrl?: string; // URL внешнего бекенда рекомендаций (trycloudflare)
+}
+🌐 Эндпоинты (API ручки) проекта
+Сервер реализован на Express (/server.ts) и предоставляет полноценное API для управления АЗС, парсинга сообщений с помощью ИИ, работы с внешними рекомендациями и симуляции интеграций.
+Ниже приведен перечень всех существующих API-маршрутов:
+1. Управление АЗС (Gas Stations)
+GET /api/stations
+Описание: Возвращает массив всех АЗС (GasStation[]).
+POST /api/stations
+Описание: Добавление новой АЗС.
+Тело запроса: { brand, address, coords: { lat, lng }, status, queueLength, waitingTime, confidenceScore, deficitForecast, nextDelivery, apiUrl, apiKey }
+POST /api/stations/edit
+Описание: Редактирование существующей АЗС.
+Тело запроса: { id, brand, address, coords, status, queueLength, waitingTime, confidenceScore, deficitForecast, nextDelivery, apiUrl, apiKey }
+POST /api/stations/delete
+Описание: Удаление АЗС по её ID.
+Тело запроса: { id }
+POST /api/stations/override
+Описание: Ручной административный сброс/переопределение параметров АЗС.
+Тело запроса: { id, status, queueLength, waitingTime, deficitForecast, nextDelivery }
+POST /api/stations/sync-api
+Описание: Симуляция запроса обновления данных АЗС через её индивидуальный внешний API (apiUrl).
+Тело запроса: { id }
+POST /api/stations/refresh-analysis
+Описание: Перерасчет показателей АЗС (индекса достоверности, прогноза дефицита и очередей) на основе всех имеющихся в базе чатов.
+Тело запроса: { id }
+2. Интеграция и парсинг чатов Telegram / Max
+GET /api/chats
+Описание: Получение списка всех зафиксированных сообщений.
+POST /api/chats/delete
+Описание: Удаление отдельного сообщения по ID.
+Тело запроса: { id }
+POST /api/chats/clear
+Описание: Полная очистка лога сообщений.
+GET /api/chats/connected
+Описание: Проверка статуса подключения внешнего моста (Telegram CLI / Max).
+POST /api/chats/connect-link
+Описание: Инициация подключения нового внешнего источника сообщений по ссылке/токену.
+Тело запроса: { link }
+POST /api/chats/disconnect
+Описание: Отключение внешнего моста/канала.
+POST /api/chat/parse
+Описание: Критическая ручка. Отправляет текст сообщения в Gemini API с системным промптом, извлекает структурированную информацию об АЗС, бренде, наличии видов топлива, очередях и определяет фейковость сообщения.
+Тело запроса: { text, sender, source }
+3. Настройка источников (Telegram-каналы)
+GET /api/channels
+Описание: Получение списка отслеживаемых Telegram-каналов.
+POST /api/channels
+Описание: Добавление канала для мониторинга.
+Тело запроса: { name, keywords }
+POST /api/channels/delete
+Описание: Удаление канала из мониторинга.
+Тело запроса: { id }
+POST /api/channels/toggle-analysis
+Описание: Включение или исключение канала из общего ИИ-анализа.
+Тело запроса: { id }
+4. Внешние ИИ-рекомендации (TryCloudflare)
+GET /api/recommendations
+Описание: Прокси-эндпоинт. Совершает запрос к вашему внешнему Fast-API бекенду рекомендаций (адрес берется из настроек, по умолчанию: https://banner-airplane-yard-relay.trycloudflare.com/recommendation).
+Возвращает: Ответ в формате JSON от внешнего бекенда. В случае недоступности туннеля осуществляет автопереключение на встроенный локальный алгоритм (fallback).
+5. Отчеты пользователей (Crowdsourcing Reports)
+POST /api/reports
+Описание: Позволяет водителю отправить быстрый репорт прямо из приложения. Влияет на текущие показатели АЗС.
+Тело запроса: { stationId, fuelType, status, queueLength }
+6. Пользователи / Подписчики
+GET /api/subscribers
+Описание: Получение списка активных участников, отправляющих репорты и сообщения.
+POST /api/subscribers/ban
+Описание: Блокировка или разблокировка пользователя (при обнаружении вброса фейков).
+Тело запроса: { name, ban: boolean }
+7. Системные ручки
+GET /api/settings — получить текущие настройки LLM (модель, температура, промпты, API-ключ, прокси, адрес туннеля рекомендаций).
+POST /api/settings — обновить системные настройки.
+GET /api/logs — получить лог системных событий сервера (информационные логи, предупреждения, успехи парсинга).
+POST /api/reset — сбросить состояние базы данных сервера к исходным демо-данным Юга России.
+GET /api/backend/code — получить исходный код FastAPI для экспорта (для удобного развертывания автономного Python-бекенда).
